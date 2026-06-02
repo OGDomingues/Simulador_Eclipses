@@ -7,7 +7,6 @@ _EPH = None
 
 
 def get_context():
-
     global _TS, _EPH
 
     if _TS is None:

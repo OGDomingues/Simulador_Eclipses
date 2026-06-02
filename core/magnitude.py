@@ -1,10 +1,10 @@
 import numpy as np
-from core.constants import R_SUN_KM, R_MOON_KM
 from skyfield.api import wgs84
+
+from core.constants import R_SUN_KM, R_MOON_KM
 
 
 def compute_surface_max_magnitude(eph, ts, t_center, lat, lon):
-
     earth = eph["earth"]
     sun = eph["sun"]
     moon = eph["moon"]

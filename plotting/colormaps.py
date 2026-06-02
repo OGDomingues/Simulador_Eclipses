@@ -2,7 +2,6 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 
 
 def get_obscuration_colormap(max_obsc):
-
     if max_obsc < 1.0:
 
         colors = [

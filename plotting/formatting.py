@@ -1,6 +1,3 @@
-import numpy as np
-
-
 def format_time(t):
     if t is None:
         return "--"
@@ -21,7 +18,6 @@ def duration_str(t1, t2):
 
 
 def best_corner_position(max_point):
-
     lat_m, lon_m, _ = max_point
 
     north = lat_m >= 0

@@ -6,13 +6,12 @@ from core.constants import AU_KM, R_EARTH_KM
 
 
 def central_path(
-    eph,
-    ts,
-    t_start,
-    t_end,
-    step_minutes=1,
+        eph,
+        ts,
+        t_start,
+        t_end,
+        step_minutes=1,
 ):
-
     earth = eph["earth"]
     sun = eph["sun"]
     moon = eph["moon"]
@@ -59,7 +58,7 @@ def central_path(
 
         a = 1.0
         b = 2 * np.dot(m, axis)
-        c = np.dot(m, m) - R_EARTH_KM**2
+        c = np.dot(m, m) - R_EARTH_KM ** 2
 
         disc = b * b - 4 * a * c
 

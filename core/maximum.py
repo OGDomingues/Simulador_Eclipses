@@ -7,8 +7,6 @@ def refine_maximum(eph, ts, t_guess):
     moon = eph["moon"]
 
     t0 = t_guess.utc_datetime()
-
-    # estágio grosso
     minutes = np.arange(-720, 720, 3.0)
 
     times = ts.utc(
@@ -24,8 +22,6 @@ def refine_maximum(eph, ts, t_guess):
     ).degrees
 
     t_coarse = times[np.argmin(sep)]
-
-    # estágio fino
     t1 = t_coarse.utc_datetime()
 
     minutes = np.arange(-5, 5, 0.02)

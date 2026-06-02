@@ -1,4 +1,5 @@
 import matplotlib
+
 matplotlib.use("Agg")
 
 from pathlib import Path
@@ -29,7 +30,6 @@ from .formatting import (
 )
 
 from .colormaps import get_obscuration_colormap
-
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 NATURAL_EARTH_DIR = BASE_DIR / "data" / "natural_earth"
@@ -104,12 +104,12 @@ def shapefile_parts(shp_path):
 
 
 def add_polygon_shapefile(
-    ax,
-    shp_path,
-    facecolor,
-    edgecolor,
-    linewidth,
-    zorder,
+        ax,
+        shp_path,
+        facecolor,
+        edgecolor,
+        linewidth,
+        zorder,
 ):
     polygons = [
         coords
@@ -130,12 +130,12 @@ def add_polygon_shapefile(
 
 
 def add_line_shapefile(
-    ax,
-    shp_path,
-    color,
-    linewidth,
-    alpha,
-    zorder,
+        ax,
+        shp_path,
+        color,
+        linewidth,
+        alpha,
+        zorder,
 ):
     lines = list(shapefile_parts(shp_path))
 
@@ -317,20 +317,17 @@ def build_smooth_plot_grid(lat_unique, lon_unique, grid):
 
 
 def plot_obscuration_map(
-    points,
-    title,
-    output="obscuration.png",
-    central_path=None,
-    max_point=None,
-    eclipse_type=None,
-    eclipse_data=None,
+        points,
+        title,
+        output="obscuration.png",
+        central_path=None,
+        max_point=None,
+        eclipse_type=None,
+        eclipse_data=None,
 ):
-
     if not points:
         print("[WARN] Nenhum ponto para plotar.")
         return
-
-    # ================= GRID =================
     lats = np.array([p[0] for p in points])
     lons = np.array([p[1] for p in points])
     values = np.array([p[2] for p in points])
@@ -369,8 +366,6 @@ def plot_obscuration_map(
         lon_unique,
         grid
     )
-
-    # ================= FIGURA =================
     fig = plt.figure(figsize=(16, 8))
 
     use_cartopy = ccrs is not None and cfeature is not None
@@ -440,8 +435,6 @@ def plot_obscuration_map(
             "[WARN] Cartopy indisponivel. "
             "Usando fallback Natural Earth."
         )
-
-    # ================= COLORMAP =================
     cmap, norm, levels, labels = (
         get_obscuration_colormap(max_obsc)
     )
@@ -478,16 +471,14 @@ def plot_obscuration_map(
             zorder=3,
             **map_transform,
         )
-
-    # ================= LINHA CENTRAL =================
     if central_path and len(central_path) > 1:
 
         segments = []
         current = [central_path[0]]
 
         for prev, curr in zip(
-            central_path[:-1],
-            central_path[1:]
+                central_path[:-1],
+                central_path[1:]
         ):
 
             if abs(curr[1] - prev[1]) > 180:
@@ -499,7 +490,6 @@ def plot_obscuration_map(
         segments.append(current)
 
         for seg in segments:
-
             ax.plot(
                 [p[1] for p in seg],
                 [p[0] for p in seg],
@@ -508,8 +498,6 @@ def plot_obscuration_map(
                 zorder=6,
                 **map_transform,
             )
-
-    # ================= MARCADOR =================
     if max_point:
 
         lat_m, lon_m, _ = max_point
@@ -537,14 +525,11 @@ def plot_obscuration_map(
             zorder=7,
             **map_transform,
         )
-
-    # ================= PAINEL =================
     if (
-        eclipse_data is not None
-        and
-        max_point is not None
+            eclipse_data is not None
+            and
+            max_point is not None
     ):
-
         lat_m, lon_m, _ = max_point
 
         corner = best_corner_position(
@@ -601,8 +586,6 @@ def plot_obscuration_map(
             ),
             zorder=20,
         )
-
-    # ================= COLORBAR =================
     sm = plt.cm.ScalarMappable(
         cmap=cmap,
         norm=norm
@@ -647,4 +630,4 @@ def plot_obscuration_map(
 
     print(
         f"Mapa salvo em: {output}"
-    )   
+    )

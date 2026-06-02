@@ -1,25 +1,19 @@
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from skyfield.api import load, load_file
-
-from infrastructure.config import EPHEMERIS_PATH
 
 from core import (
     is_possible_eclipse,
     refine_maximum,
     compute_contacts,
 )
-
-# =====================================================
-# Contexto global por processo
-# =====================================================
+from infrastructure.config import EPHEMERIS_PATH
 _TS = None
 _EPH = None
 
 
 def _get_context():
-
     global _TS, _EPH
 
     if _TS is None:
@@ -31,19 +25,13 @@ def _get_context():
         )
 
     return _EPH, _TS
-
-
-# =====================================================
-# Processamento individual
-# =====================================================
 def _process_one(t_nm):
-
     eph, ts = _get_context()
 
     if not is_possible_eclipse(
-        eph,
-        ts,
-        t_nm
+            eph,
+            ts,
+            t_nm
     ):
         return None
 
@@ -70,23 +58,17 @@ def _process_one(t_nm):
         "C3": C3,
         "C4": C4,
     }
-
-
-# =====================================================
-# Execução paralela
-# =====================================================
 def run_batch(
-    new_moon_times,
-    max_workers=None,
+        new_moon_times,
+        max_workers=None,
 ):
-
     if max_workers is None:
         max_workers = os.cpu_count()
 
     results = []
 
     with ProcessPoolExecutor(
-        max_workers=max_workers
+            max_workers=max_workers
     ) as executor:
 
         futures = [

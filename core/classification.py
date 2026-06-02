@@ -1,4 +1,5 @@
 import numpy as np
+
 from .constants import R_SUN_KM, R_MOON_KM
 
 
@@ -7,7 +8,6 @@ def apparent_radius_arcsec(radius_km, distance_km):
 
 
 def classify_eclipse(eph, central_times, max_obscuration, eps_arcsec=0.5):
-
     if max_obscuration < 0.9:
         return "Parcial"
 

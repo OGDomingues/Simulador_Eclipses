@@ -3,29 +3,22 @@ import sys
 from datetime import date
 from multiprocessing import Pool, cpu_count
 
-from utils.timer import Timer
-
 from core import (
     new_moons,
     classify_eclipse,
     eclipse_title,
 )
-
 from core.magnitude import compute_surface_max_magnitude
-
-from infrastructure.ephemeris import get_context
-from infrastructure.config import OUTPUT_DIR, EPHEMERIS_PATH
-
-from pipeline.batch import run_batch
-
 from geometry import (
     central_path,
     eclipse_obscuration_map,
     eclipse_bounding_box,
 )
-
+from infrastructure.config import OUTPUT_DIR, EPHEMERIS_PATH
+from infrastructure.ephemeris import get_context
+from pipeline.batch import run_batch
 from plotting import plot_obscuration_map
-
+from utils.timer import Timer
 
 DEFAULT_START_DATE = date(2024, 1, 1)
 DEFAULT_END_DATE = date(2024, 12, 31)
@@ -82,18 +75,10 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-# =====================================================
-# ORCHESTRATOR PRINCIPAL
-# =====================================================
 def run_simulation(start_date: date, end_date: date):
-
     print("\n🔭 Iniciando simulação...\n")
 
     eph, ts = get_context()
-
-    # ==================================================
-    # FASE A — Buscar eclipses
-    # ==================================================
     print("🔎 Buscando luas novas...")
 
     t_start = ts.utc(
@@ -131,23 +116,15 @@ def run_simulation(start_date: date, end_date: date):
         print(e["date"])
 
     print("\n")
-
-    # ==================================================
-    # FASE B — Processamento físico completo
-    # ==================================================
     print("🌍 Processando dados físicos...\n")
 
     with Pool(
-        processes=max(1, cpu_count() - 1)
+            processes=max(1, cpu_count() - 1)
     ) as pool:
 
         for e in eclipses:
 
             print(f"Processando {e['date']}...")
-
-            # -------------------------------------------------
-            # Bounding box inicial
-            # -------------------------------------------------
             with Timer("Bounding box"):
 
                 lat_min, lat_max, lon_min, lon_max = (
@@ -161,10 +138,6 @@ def run_simulation(start_date: date, end_date: date):
                         pool=pool,
                     )
                 )
-
-            # -------------------------------------------------
-            # Mapa final (alta resolução)
-            # -------------------------------------------------
             with Timer("Mapa obscuração"):
 
                 points = eclipse_obscuration_map(
@@ -190,16 +163,12 @@ def run_simulation(start_date: date, end_date: date):
                         "⚠️ Nenhum ponto de sombra encontrado."
                     )
                     continue
-
-            # -------------------------------------------------
-            # Linha central
-            # -------------------------------------------------
             with Timer("Linha central"):
 
                 if (
-                    e["C2"] is not None
-                    and
-                    e["C3"] is not None
+                        e["C2"] is not None
+                        and
+                        e["C3"] is not None
                 ):
 
                     e["central_path"] = central_path(
@@ -213,15 +182,11 @@ def run_simulation(start_date: date, end_date: date):
                 else:
 
                     e["central_path"] = []
-
-            # -------------------------------------------------
-            # Determinar ponto máximo
-            # -------------------------------------------------
             if e["central_path"]:
 
                 mid = (
-                    len(e["central_path"])
-                    // 2
+                        len(e["central_path"])
+                        // 2
                 )
 
                 lat_m, lon_m, _ = (
@@ -240,10 +205,6 @@ def run_simulation(start_date: date, end_date: date):
                 lon_m,
                 None
             )
-
-            # -------------------------------------------------
-            # Magnitude
-            # -------------------------------------------------
             with Timer("Magnitude"):
 
                 e["magnitude"] = (
@@ -255,10 +216,6 @@ def run_simulation(start_date: date, end_date: date):
                         lon_m,
                     )
                 )
-
-            # -------------------------------------------------
-            # Classificação final
-            # -------------------------------------------------
             max_obsc = max(
                 p[2]
                 for p in points
@@ -269,14 +226,10 @@ def run_simulation(start_date: date, end_date: date):
                 central_times=[e["MAX"]],
                 max_obscuration=max_obsc,
             )
-
-            # -------------------------------------------------
-            # Plot
-            # -------------------------------------------------
             output_file = (
-                OUTPUT_DIR
-                /
-                f"Eclipse_Solar_{e['type']}_{e['date']}.png"
+                    OUTPUT_DIR
+                    /
+                    f"Eclipse_Solar_{e['type']}_{e['date']}.png"
             )
 
             with Timer("Plot"):

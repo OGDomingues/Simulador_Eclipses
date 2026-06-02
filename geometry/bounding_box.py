@@ -1,17 +1,17 @@
 import numpy as np
+
 from .surface_map import eclipse_obscuration_map
 
 
 def eclipse_bounding_box(
-    eph_path,
-    t_start,
-    t_end,
-    coarse_step=5.0,
-    threshold=0.001,
-    time_chunks=2,
-    pool=None,
+        eph_path,
+        t_start,
+        t_end,
+        coarse_step=5.0,
+        threshold=0.001,
+        time_chunks=2,
+        pool=None,
 ):
-
     points = eclipse_obscuration_map(
         eph_path=eph_path,
         t_start=t_start,

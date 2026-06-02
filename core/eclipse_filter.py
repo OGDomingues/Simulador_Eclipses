@@ -1,9 +1,9 @@
 import numpy as np
+
 from .constants import R_SUN_KM, R_MOON_KM, R_EARTH_KM
 
 
 def is_possible_eclipse(eph, ts, t_nm):
-
     earth = eph["earth"]
     sun = eph["sun"]
     moon = eph["moon"]
@@ -50,10 +50,10 @@ def is_possible_eclipse(eph, ts, t_nm):
     )
 
     limit = (
-        sun_r
-        + moon_r
-        + earth_r
-        + 0.2
+            sun_r
+            + moon_r
+            + earth_r
+            + 0.2
     )
 
     return np.any(sep < limit)

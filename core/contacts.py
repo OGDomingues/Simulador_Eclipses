@@ -1,4 +1,5 @@
 import numpy as np
+
 from .constants import R_SUN_KM, R_MOON_KM, R_EARTH_KM
 
 
@@ -12,22 +13,20 @@ def _find_contact(times, sep, limit):
             return times[i]
 
         if f1 * f2 < 0:
-
             frac = abs(f1) / (
-                abs(f1) + abs(f2)
+                    abs(f1) + abs(f2)
             )
 
             return (
-                times[i]
-                +
-                (times[i + 1] - times[i]) * frac
+                    times[i]
+                    +
+                    (times[i + 1] - times[i]) * frac
             )
 
     return None
 
 
 def compute_contacts(eph, ts, t_max):
-
     earth = eph["earth"]
     sun = eph["sun"]
     moon = eph["moon"]
@@ -74,14 +73,14 @@ def compute_contacts(eph, ts, t_max):
     )
 
     partial = (
-        sun_r
-        + moon_r
-        + earth_r
+            sun_r
+            + moon_r
+            + earth_r
     )
 
     total = (
-        np.abs(sun_r - moon_r)
-        + earth_r
+            np.abs(sun_r - moon_r)
+            + earth_r
     )
 
     C1 = _find_contact(

@@ -1,23 +1,14 @@
-import numpy as np
-from multiprocessing import Pool, cpu_count
 from collections import defaultdict
+from multiprocessing import Pool, cpu_count
+
+import numpy as np
 from skyfield.api import load, load_file
 
 from core.constants import R_SUN_KM, R_MOON_KM
 from .geodesy import geodetic_to_ecef, ecef_to_gcrs
 from .obscuration import angle_between, eclipse_obscuration_vec
-
-
-# =====================================================
-# Cache por processo (evita recarregar efemérides)
-# =====================================================
 _EPH = None
 _TS = None
-
-
-# =====================================================
-# WORKER GEOMÉTRICO
-# =====================================================
 def _worker(args):
     latitudes, lons, t0, t1, eph_path = args
 
@@ -33,10 +24,6 @@ def _worker(args):
     earth = eph["earth"]
     sun = eph["sun"]
     moon = eph["moon"]
-
-    # =====================
-    # TEMPO
-    # =====================
     times = ts.tt_jd(np.linspace(t0, t1, 20))
 
     earth_at_t = earth.at(times)
@@ -45,24 +32,15 @@ def _worker(args):
     moon_vec_all = earth_at_t.observe(moon).apparent().position.km.T
 
     T = len(times)
-
-    # =====================
-    # GRID
-    # =====================
     lat_grid, lon_grid = np.meshgrid(latitudes, lons, indexing="ij")
     lat_flat = lat_grid.ravel()
     lon_flat = lon_grid.ravel()
 
     ecef = geodetic_to_ecef(lat_flat, lon_flat)
     P = len(lat_flat)
-
-    # =====================
-    # ROTACIONAR OBSERVADOR PARA TODOS OS TEMPOS
-    # =====================
     obsc_all = np.zeros((T, P))
 
     for i in range(T):
-
         theta = np.radians(times[i].gmst * 15.0)
         obs_vec = ecef_to_gcrs(ecef, theta)
 
@@ -95,31 +73,22 @@ def _worker(args):
             result[(lat_flat[i], lon_flat[i])] = val
 
     return result
-
-
-# =====================================================
-# FUNÇÃO PRINCIPAL
-# =====================================================
 def eclipse_obscuration_map(
-    eph_path,
-    t_start,
-    t_end,
-    lat_step=1.5,
-    lon_step=1.5,
-    time_chunks=6,
-    processes=None,
-    lat_range=(-90, 90),
-    lon_range=(-180, 180),
-    pool=None,
+        eph_path,
+        t_start,
+        t_end,
+        lat_step=1.5,
+        lon_step=1.5,
+        time_chunks=6,
+        processes=None,
+        lat_range=(-90, 90),
+        lon_range=(-180, 180),
+        pool=None,
 ):
     """
     Calcula a obscuração máxima do Sol na superfície
     durante o intervalo [t_start, t_end].
     """
-
-    # -------------------------------------------------
-    # Pool externo ou interno
-    # -------------------------------------------------
     if pool is None:
         if processes is None:
             processes = max(1, cpu_count() - 1)
@@ -136,14 +105,10 @@ def eclipse_obscuration_map(
 
     lats = np.arange(lat_min, lat_max + lat_step, lat_step)
     lons = np.arange(lon_min, lon_max + lon_step, lon_step)
-
-    # Dividir latitude em blocos
     lat_chunks = np.array_split(
         lats,
         max(1, len(lats) // 30)
     )
-
-    # Dividir tempo
     t_edges = np.linspace(
         t_start.tt,
         t_end.tt,
@@ -157,10 +122,6 @@ def eclipse_obscuration_map(
     ]
 
     results = local_pool.map(_worker, tasks)
-
-    # -------------------------------------------------
-    # Combinar blocos
-    # -------------------------------------------------
     final = defaultdict(float)
 
     for block in results:

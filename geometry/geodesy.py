@@ -1,6 +1,4 @@
 import numpy as np
-
-# WGS84
 A = 6378.137
 F = 1 / 298.257223563
 E2 = F * (2 - F)
@@ -25,8 +23,8 @@ def ecef_to_gcrs(ecef, theta):
 
     R = np.array([
         [c, -s, 0],
-        [s,  c, 0],
-        [0,  0, 1]
+        [s, c, 0],
+        [0, 0, 1]
     ])
 
     return (R @ ecef.T).T
