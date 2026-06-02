@@ -1,0 +1,1 @@
+Este ZIP foi reconstruído a partir dos trechos disponíveis na conversa. Alguns arquivos estão marcados como versão parcial porque o conteúdo completo não estava disponível integralmente.
