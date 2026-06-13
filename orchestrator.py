@@ -20,8 +20,8 @@ from pipeline.batch import run_batch
 from plotting import plot_obscuration_map
 from utils.timer import Timer
 
-DEFAULT_START_DATE = date(2024, 1, 1)
-DEFAULT_END_DATE = date(2024, 12, 31)
+DEFAULT_START_DATE = date(2027, 1, 1)
+DEFAULT_END_DATE = date(2027, 12, 31)
 
 
 def configure_console() -> None:
@@ -136,6 +136,8 @@ def run_simulation(start_date: date, end_date: date):
                         threshold=0.001,
                         time_chunks=4,
                         pool=pool,
+                        eph=eph,
+                        ts=ts,
                     )
                 )
             with Timer("Mapa obscuração"):
@@ -146,7 +148,7 @@ def run_simulation(start_date: date, end_date: date):
                     t_end=e["C4"],
                     lat_step=0.25,
                     lon_step=0.25,
-                    time_chunks=12,
+                    time_chunks=20,
                     lat_range=(
                         lat_min,
                         lat_max
@@ -156,6 +158,8 @@ def run_simulation(start_date: date, end_date: date):
                         lon_max
                     ),
                     pool=pool,
+                    eph=eph,
+                    ts=ts,
                 )
 
                 if not points:

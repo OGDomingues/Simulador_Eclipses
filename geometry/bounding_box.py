@@ -11,6 +11,8 @@ def eclipse_bounding_box(
         threshold=0.001,
         time_chunks=2,
         pool=None,
+        eph=None,
+        ts=None,
 ):
     points = eclipse_obscuration_map(
         eph_path=eph_path,
@@ -20,6 +22,8 @@ def eclipse_bounding_box(
         lon_step=coarse_step,
         time_chunks=time_chunks,
         pool=pool,
+        eph=eph,
+        ts=ts,
     )
 
     if not points:

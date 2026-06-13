@@ -10,13 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection, PolyCollection
 from scipy.ndimage import gaussian_filter, zoom
-
-try:
-    import cartopy.crs as ccrs
-    import cartopy.feature as cfeature
-except ModuleNotFoundError:
-    ccrs = None
-    cfeature = None
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 
 try:
     import shapefile
@@ -38,6 +33,38 @@ NATURAL_EARTH_FILES = {
         "ne_50m_land",
         "https://naturalearth.s3.amazonaws.com/50m_physical/ne_50m_land.zip",
     ),
+    "ocean": (
+        "ne_50m_ocean",
+        "https://naturalearth.s3.amazonaws.com/50m_physical/ne_50m_ocean.zip",
+    ),
+    "coastline": (
+        "ne_50m_coastline",
+        "https://naturalearth.s3.amazonaws.com/50m_physical/ne_50m_coastline.zip",
+    ),
+    "lakes": (
+        "ne_50m_lakes",
+        "https://naturalearth.s3.amazonaws.com/50m_physical/ne_50m_lakes.zip",
+    ),
+    "rivers": (
+        "ne_50m_rivers_lake_centerlines",
+        "https://naturalearth.s3.amazonaws.com/50m_physical/"
+        "ne_50m_rivers_lake_centerlines.zip",
+    ),
+    "glaciers": (
+        "ne_50m_glaciated_areas",
+        "https://naturalearth.s3.amazonaws.com/50m_physical/"
+        "ne_50m_glaciated_areas.zip",
+    ),
+    "physical_regions": (
+        "ne_50m_geography_regions_polys",
+        "https://naturalearth.s3.amazonaws.com/50m_physical/"
+        "ne_50m_geography_regions_polys.zip",
+    ),
+    "marine_regions": (
+        "ne_50m_geography_marine_polys",
+        "https://naturalearth.s3.amazonaws.com/50m_physical/"
+        "ne_50m_geography_marine_polys.zip",
+    ),
     "borders": (
         "ne_50m_admin_0_boundary_lines_land",
         "https://naturalearth.s3.amazonaws.com/50m_cultural/"
@@ -45,11 +72,20 @@ NATURAL_EARTH_FILES = {
     ),
 }
 
+MERCATOR_MAX_LAT = 85.0
 PLOT_UPSAMPLE_FACTOR = 5
 PLOT_PADDING_CELLS = 4
 MAX_PLOT_GRID_CELLS = 2_000_000
 MIN_VISIBLE_OBSCURATION = 0.0005
 
+OCEAN_COLOR = "#79aeca"
+DEEP_OCEAN_COLOR = "#5f9fbd"
+LAND_COLOR = "#d8d0aa"
+COASTLINE_COLOR = "#2f2f2f"
+BORDER_COLOR = "#555555"
+RIVER_COLOR = "#4d8fb8"
+LAKE_COLOR = "#79bde0"
+ICE_COLOR = "#f4fbff"
 
 def ensure_natural_earth(name):
     stem, url = NATURAL_EARTH_FILES[name]
@@ -89,18 +125,99 @@ def ensure_natural_earth(name):
     return shp_path if shp_path.exists() else None
 
 
+def mercator_y(latitudes):
+    latitudes = np.asarray(latitudes, dtype=float)
+    clipped = np.clip(
+        latitudes,
+        -MERCATOR_MAX_LAT,
+        MERCATOR_MAX_LAT
+    )
+    radians = np.radians(clipped)
+
+    return np.degrees(
+        np.log(
+            np.tan(
+                (np.pi / 4.0)
+                + (radians / 2.0)
+            )
+        )
+    )
+
+
+def mercator_project_coords(coords):
+    if len(coords) == 0:
+        return []
+
+    arr = np.asarray(
+        coords,
+        dtype=float
+    )
+
+    if arr.ndim != 2 or arr.shape[1] < 2:
+        return []
+
+    valid = (
+        np.isfinite(arr[:, 0])
+        &
+        np.isfinite(arr[:, 1])
+    )
+    arr = arr[valid]
+
+    if len(arr) == 0:
+        return []
+
+    projected_y = mercator_y(arr[:, 1])
+
+    return list(
+        zip(
+            arr[:, 0],
+            projected_y
+        )
+    )
+
+
+def split_antimeridian(coords):
+    if len(coords) < 2:
+        return []
+
+    segments = []
+    current = [coords[0]]
+
+    for prev, curr in zip(coords[:-1], coords[1:]):
+        if abs(curr[0] - prev[0]) > 180:
+            if len(current) >= 2:
+                segments.append(current)
+
+            current = [curr]
+        else:
+            current.append(curr)
+
+    if len(current) >= 2:
+        segments.append(current)
+
+    return segments
+
+
+def shape_parts(shape):
+    points = shape.points
+    parts = list(shape.parts) + [len(points)]
+
+    for start, end in zip(parts[:-1], parts[1:]):
+        coords = points[start:end]
+
+        if len(coords) >= 2:
+            yield coords
+
+
 def shapefile_parts(shp_path):
     reader = shapefile.Reader(str(shp_path))
 
-    for shape in reader.shapes():
-        points = shape.points
-        parts = list(shape.parts) + [len(points)]
+    try:
+        for shape in reader.shapes():
+            yield from shape_parts(shape)
 
-        for start, end in zip(parts[:-1], parts[1:]):
-            coords = points[start:end]
-
-            if len(coords) >= 2:
-                yield coords
+    finally:
+        reader.close()
 
 
 def add_polygon_shapefile(
@@ -110,12 +227,26 @@ def add_polygon_shapefile(
         edgecolor,
         linewidth,
         zorder,
+        alpha=1.0,
+        project=False,
 ):
     polygons = [
-        coords
+        (
+            mercator_project_coords(coords)
+            if project
+            else coords
+        )
         for coords in shapefile_parts(shp_path)
         if len(coords) >= 3
     ]
+    polygons = [
+        polygon
+        for polygon in polygons
+        if len(polygon) >= 3
+    ]
+
+    if not polygons:
+        return
 
     ax.add_collection(
         PolyCollection(
@@ -124,6 +255,7 @@ def add_polygon_shapefile(
             edgecolors=edgecolor,
             linewidths=linewidth,
             closed=True,
+            alpha=alpha,
             zorder=zorder,
         )
     )
@@ -136,8 +268,20 @@ def add_line_shapefile(
         linewidth,
         alpha,
         zorder,
+        project=False,
 ):
-    lines = list(shapefile_parts(shp_path))
+    lines = []
+
+    for coords in shapefile_parts(shp_path):
+        for segment in split_antimeridian(coords):
+            if project:
+                segment = mercator_project_coords(segment)
+
+            if len(segment) >= 2:
+                lines.append(segment)
+
+    if not lines:
+        return
 
     ax.add_collection(
         LineCollection(
@@ -158,16 +302,98 @@ def add_plain_map_features(ax):
         )
         return
 
+    marine_path = ensure_natural_earth("marine_regions")
+
+    if marine_path is not None:
+        add_polygon_shapefile(
+            ax,
+            marine_path,
+            facecolor=DEEP_OCEAN_COLOR,
+            edgecolor="none",
+            linewidth=0.0,
+            alpha=0.22,
+            zorder=-2,
+            project=True,
+        )
+
+    ocean_path = ensure_natural_earth("ocean")
+
+    if ocean_path is not None:
+        add_polygon_shapefile(
+            ax,
+            ocean_path,
+            facecolor=OCEAN_COLOR,
+            edgecolor="none",
+            linewidth=0.0,
+            zorder=-3,
+            project=True,
+        )
+
     land_path = ensure_natural_earth("land")
 
     if land_path is not None:
         add_polygon_shapefile(
             ax,
             land_path,
-            facecolor="#f4f1de",
-            edgecolor="#2f2f2f",
-            linewidth=0.25,
+            facecolor=LAND_COLOR,
+            edgecolor="none",
+            linewidth=0.0,
             zorder=0,
+            project=True,
+        )
+
+    glaciers_path = ensure_natural_earth("glaciers")
+
+    if glaciers_path is not None:
+        add_polygon_shapefile(
+            ax,
+            glaciers_path,
+            facecolor=ICE_COLOR,
+            edgecolor="#aac9d6",
+            linewidth=0.15,
+            alpha=0.90,
+            zorder=1.25,
+            project=True,
+        )
+
+    lakes_path = ensure_natural_earth("lakes")
+
+    if lakes_path is not None:
+        add_polygon_shapefile(
+            ax,
+            lakes_path,
+            facecolor=LAKE_COLOR,
+            edgecolor="#4d8fb8",
+            linewidth=0.25,
+            alpha=0.90,
+            zorder=4,
+            project=True,
+        )
+
+    rivers_path = ensure_natural_earth("rivers")
+
+    if rivers_path is not None:
+        add_line_shapefile(
+            ax,
+            rivers_path,
+            color=RIVER_COLOR,
+            linewidth=0.28,
+            alpha=0.55,
+            zorder=4.1,
+            project=True,
+        )
+
+    coastline_path = ensure_natural_earth("coastline")
+
+    if coastline_path is not None:
+        add_line_shapefile(
+            ax,
+            coastline_path,
+            color=COASTLINE_COLOR,
+            linewidth=0.5,
+            alpha=0.8,
+            zorder=5,
+            project=True,
         )
 
     borders_path = ensure_natural_earth("borders")
@@ -176,11 +402,64 @@ def add_plain_map_features(ax):
         add_line_shapefile(
             ax,
             borders_path,
-            color="#555555",
+            color=BORDER_COLOR,
             linewidth=0.35,
             alpha=0.7,
             zorder=4,
+            project=True,
         )
+
+
+def add_cartopy_map_features(ax):
+    ax.set_facecolor("#9bc3de")
+    ax.stock_img()
+    ax.coastlines(resolution="110m", color="#4c4c4c", linewidth=0.45, zorder=4)
+    ax.add_feature(
+        cfeature.BORDERS.with_scale("110m"),
+        linewidth=0.25,
+        edgecolor="#5a5a5a",
+        alpha=0.55,
+        zorder=4.1,
+    )
+
+
+def configure_plain_mercator_axes(ax):
+    lat_ticks = np.array(
+        [-80, -60, -40, -20, 0, 20, 40, 60, 80],
+        dtype=float
+    )
+    lon_ticks = np.arange(
+        -180,
+        181,
+        30
+    )
+
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(
+        mercator_y(-MERCATOR_MAX_LAT),
+        mercator_y(MERCATOR_MAX_LAT)
+    )
+    ax.set_xticks(lon_ticks)
+    ax.set_yticks(mercator_y(lat_ticks))
+    ax.set_yticklabels(
+        [
+            f"{lat:g} deg"
+            for lat in lat_ticks
+        ]
+    )
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude (Mercator)")
+    ax.set_aspect(
+        "equal",
+        adjustable="box"
+    )
+    ax.grid(
+        linewidth=0.3,
+        color="gray",
+        alpha=0.28,
+        linestyle="--",
+        zorder=10,
+    )
 
 
 def grid_step(values):
@@ -234,8 +513,8 @@ def build_smooth_plot_grid(lat_unique, lon_unique, grid):
     plot_lats = expanded_axis(
         lat_unique,
         lat_step,
-        -90.0,
-        90.0
+        -MERCATOR_MAX_LAT,
+        MERCATOR_MAX_LAT
     )
 
     plot_lons = expanded_axis(
@@ -332,6 +611,40 @@ def plot_obscuration_map(
     lons = np.array([p[1] for p in points])
     values = np.array([p[2] for p in points])
 
+    mercator_mask = (
+        (lats >= -MERCATOR_MAX_LAT)
+        &
+        (lats <= MERCATOR_MAX_LAT)
+    )
+
+    if not np.any(mercator_mask):
+        print(
+            "[WARN] Nenhum ponto dentro do limite valido "
+            "da projecao Mercator."
+        )
+        return
+
+    clipped_count = len(lats) - int(np.count_nonzero(mercator_mask))
+
+    if clipped_count:
+        print(
+            "[WARN] "
+            f"{clipped_count} ponto(s) acima de "
+            f"{MERCATOR_MAX_LAT:g} graus foram omitidos "
+            "na projecao Mercator."
+        )
+
+    lats = lats[mercator_mask]
+    lons = lons[mercator_mask]
+    values = values[mercator_mask]
+    plot_points = list(
+        zip(
+            lats,
+            lons,
+            values
+        )
+    )
+
     max_obsc = np.nanmax(values)
 
     lat_unique = np.unique(lats)
@@ -355,7 +668,7 @@ def plot_obscuration_map(
         for j, lon in enumerate(lon_unique)
     }
 
-    for lat, lon, v in points:
+    for lat, lon, v in plot_points:
         grid[
             lat_index[lat],
             lon_index[lon]
@@ -366,87 +679,54 @@ def plot_obscuration_map(
         lon_unique,
         grid
     )
-    fig = plt.figure(figsize=(16, 8))
+    fig = plt.figure(figsize=(16, 11))
 
-    use_cartopy = ccrs is not None and cfeature is not None
+    data_crs = ccrs.PlateCarree()
 
-    if use_cartopy:
-        ax = plt.axes(
-            projection=ccrs.PlateCarree()
-        )
+    ax = plt.axes(projection=data_crs)
 
-        ax.set_global()
+    ax.set_extent(
+        [
+            -180,
+            180,
+            -MERCATOR_MAX_LAT,
+            MERCATOR_MAX_LAT,
+        ],
+        crs=data_crs,
+    )
 
-        ax.set_facecolor("#a9cce3")
+    add_cartopy_map_features(ax)
 
-        ax.add_feature(
-            cfeature.LAND,
-            facecolor="#f4f1de",
-            edgecolor="none",
-            zorder=0
-        )
+    gridliner = ax.gridlines(
+        crs=data_crs,
+        draw_labels=True,
+        linewidth=0.3,
+        color="gray",
+        alpha=0.28,
+        linestyle="--"
+    )
 
-        ax.stock_img()
+    for attr in ("top_labels", "right_labels"):
+        if hasattr(gridliner, attr):
+            setattr(gridliner, attr, False)
 
-        ax.add_feature(
-            cfeature.COASTLINE.with_scale("50m"),
-            linewidth=0.8,
-            edgecolor="#2f2f2f",
-            zorder=4
-        )
-
-        ax.add_feature(
-            cfeature.BORDERS.with_scale("50m"),
-            linewidth=0.4,
-            edgecolor="#555555",
-            alpha=0.7,
-            zorder=4
-        )
-
-        ax.gridlines(
-            draw_labels=False,
-            linewidth=0.3,
-            color="gray",
-            alpha=0.3,
-            linestyle="--"
-        )
-
-        map_transform = {
-            "transform": ccrs.PlateCarree()
-        }
-
-    else:
-        ax = plt.axes()
-        ax.set_facecolor("#a9cce3")
-        add_plain_map_features(ax)
-        ax.set_xlim(-180, 180)
-        ax.set_ylim(-90, 90)
-        ax.set_xlabel("Longitude")
-        ax.set_ylabel("Latitude")
-        ax.grid(
-            linewidth=0.3,
-            color="gray",
-            alpha=0.3,
-            linestyle="--"
-        )
-        map_transform = {}
-
-        print(
-            "[WARN] Cartopy indisponivel. "
-            "Usando fallback Natural Earth."
-        )
+    map_transform = {
+        "transform": data_crs
+    }
+    plot_x = Lon
+    plot_y = Lat
     cmap, norm, levels, labels = (
         get_obscuration_colormap(max_obsc)
     )
 
     ax.contourf(
-        Lon,
-        Lat,
+        plot_x,
+        plot_y,
         smooth,
         levels=levels,
         cmap=cmap,
         norm=norm,
-        alpha=0.85,
+        alpha=0.74,
         antialiased=True,
         zorder=2,
         **map_transform,
@@ -460,8 +740,8 @@ def plot_obscuration_map(
 
     if contour_levels:
         ax.contour(
-            Lon,
-            Lat,
+            plot_x,
+            plot_y,
             smooth,
             levels=contour_levels,
             colors="black",
@@ -490,9 +770,17 @@ def plot_obscuration_map(
         segments.append(current)
 
         for seg in segments:
+            seg_lons = [
+                p[1]
+                for p in seg
+            ]
+            seg_lats = [
+                p[0]
+                for p in seg
+            ]
             ax.plot(
-                [p[1] for p in seg],
-                [p[0] for p in seg],
+                seg_lons,
+                seg_lats,
                 color="black",
                 linewidth=0.6,
                 zorder=6,
@@ -564,8 +852,8 @@ def plot_obscuration_map(
             f"{'C4':<{label_width}}: {format_time(eclipse_data['C4'])} UTC\n"
             f"{'Dur. Tot.':<{label_width}}: "
             f"{duration_str(eclipse_data['C2'], eclipse_data['C3'])}\n"
-            f"{'Máximo':<{label_width}}: "
-            f"{lat_m:.2f}°, {lon_m:.2f}°"
+            f"{'Maximo':<{label_width}}: "
+            f"{lat_m:.2f} deg, {lon_m:.2f} deg"
         )
 
         ax.text(
@@ -611,7 +899,7 @@ def plot_obscuration_map(
     cb.set_ticklabels(labels)
 
     cb.set_label(
-        "Obscuração do Sol"
+        "Obscuracao do Sol"
     )
 
     ax.set_title(
