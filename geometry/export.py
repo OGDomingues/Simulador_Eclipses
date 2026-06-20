@@ -4,9 +4,10 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 import numpy as np
 import matplotlib
-
+from scipy.ndimage import zoom
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from scipy.interpolate import splprep, splev
 
 
 def _time_iso(t):
@@ -53,6 +54,26 @@ def _band_style(level):
 
 
 def _polygon_coords(segment):
+    if len(segment) > 10:
+        tck, _ = splprep(
+            [segment[:, 0], segment[:, 1]],
+            s=0
+        )
+
+        u_new = np.linspace(
+            0,
+            1,
+            len(segment) * 8
+        )
+
+        x_new, y_new = splev(
+            u_new,
+            tck
+        )
+
+        segment = np.column_stack(
+            [x_new, y_new]
+        )
     coords = [[float(x), float(y)] for x, y in segment]
     if coords and coords[0] != coords[-1]:
         coords.append(coords[0])
@@ -69,41 +90,75 @@ def _band_features(points):
 
     lat_unique = np.unique(lats)
     lon_unique = np.unique(lons)
+
     if len(lat_unique) < 2 or len(lon_unique) < 2:
         return []
 
-    grid = np.full((len(lat_unique), len(lon_unique)), np.nan)
-    lat_index = {lat: i for i, lat in enumerate(lat_unique)}
-    lon_index = {lon: j for j, lon in enumerate(lon_unique)}
+    grid = np.full(
+        (len(lat_unique), len(lon_unique)),
+        np.nan,
+    )
+
+    lat_index = {
+        lat: i
+        for i, lat in enumerate(lat_unique)
+    }
+
+    lon_index = {
+        lon: j
+        for j, lon in enumerate(lon_unique)
+    }
 
     for lat, lon, val in points:
-        grid[lat_index[lat], lon_index[lon]] = val
+        grid[
+            lat_index[lat],
+            lon_index[lon],
+        ] = val
 
     fig, ax = plt.subplots()
-    levels = _contour_levels(np.nanmax(vals))
-    cs = ax.contourf(
+
+    levels = _contour_levels(
+        np.nanmax(vals)
+    )
+
+    if not levels:
+        plt.close(fig)
+        return []
+
+    cs = ax.contour(
         lon_unique,
         lat_unique,
         grid,
-        levels=[0.0] + levels + [1.0],
+        levels=levels,
     )
+
     plt.close(fig)
 
-    band_features = []
-    for level, segments in zip(cs.levels, cs.allsegs):
-        if level == 0.0:
-            continue
-        color, alpha = _band_style(level)
+    features = []
+
+    for level, segments in zip(
+        cs.levels,
+        cs.allsegs,
+    ):
+        color, alpha = _band_style(
+            float(level)
+        )
+
         for segment in segments:
             if len(segment) < 2:
                 continue
-            coords = _polygon_coords(segment)
-            band_features.append(
+
+            coords = [
+                [float(x), float(y)]
+                for x, y in segment
+            ]
+
+            features.append(
                 _feature(
                     f"obscuration_{level:.0%}",
                     geometry={
-                        "type": "Polygon",
-                        "coordinates": [coords],
+                        "type": "LineString",
+                        "coordinates": coords,
                     },
                     properties={
                         "level": float(level),
@@ -113,7 +168,7 @@ def _band_features(points):
                 )
             )
 
-    return band_features
+    return features
 
 
 def _limit_features(points):
@@ -126,18 +181,37 @@ def _limit_features(points):
 
     lat_unique = np.unique(lats)
     lon_unique = np.unique(lons)
+
     if len(lat_unique) < 2 or len(lon_unique) < 2:
         return []
 
-    grid = np.full((len(lat_unique), len(lon_unique)), np.nan)
-    lat_index = {lat: i for i, lat in enumerate(lat_unique)}
-    lon_index = {lon: j for j, lon in enumerate(lon_unique)}
+    grid = np.full(
+        (len(lat_unique), len(lon_unique)),
+        np.nan,
+    )
+
+    lat_index = {
+        lat: i
+        for i, lat in enumerate(lat_unique)
+    }
+
+    lon_index = {
+        lon: j
+        for j, lon in enumerate(lon_unique)
+    }
 
     for lat, lon, val in points:
-        grid[lat_index[lat], lon_index[lon]] = val
+        grid[
+            lat_index[lat],
+            lon_index[lon],
+        ] = val
 
     fig, ax = plt.subplots()
-    levels = _limit_levels(np.nanmax(vals))
+
+    levels = _limit_levels(
+        np.nanmax(vals)
+    )
+
     if not levels:
         plt.close(fig)
         return []
@@ -148,29 +222,80 @@ def _limit_features(points):
         grid,
         levels=levels,
     )
+
     plt.close(fig)
 
     limit_features = []
-    for level, segments in zip(cs.levels, cs.allsegs):
+
+    for level, segments in zip(
+        cs.levels,
+        cs.allsegs,
+    ):
         for segment in segments:
+
             if len(segment) < 2:
                 continue
-            coords = [[float(x), float(y)] for x, y in segment]
-            limit_features.append(
-                _feature(
-                    "totality_annularity_limit",
-                    geometry={
-                        "type": "LineString",
-                        "coordinates": coords,
-                    },
-                    properties={
-                        "level": float(level),
-                    },
-                )
+
+            coords = [
+                [float(x), float(y)]
+                for x, y in segment
+            ]
+
+            lats_seg = np.array(
+                [c[1] for c in coords]
             )
 
-    return limit_features
+            mid_lat = (
+                lats_seg.min()
+                + lats_seg.max()
+            ) / 2.0
 
+            north_coords = [
+                c
+                for c in coords
+                if c[1] >= mid_lat
+            ]
+
+            south_coords = [
+                c
+                for c in coords
+                if c[1] < mid_lat
+            ]
+
+            if len(north_coords) > 2:
+                limit_features.append(
+                    _feature(
+                        "north_limit",
+                        geometry={
+                            "type": "LineString",
+                            "coordinates": north_coords,
+                        },
+                        properties={
+                            "level": float(level),
+                        },
+                    )
+                )
+
+            if len(south_coords) > 2:
+                limit_features.append(
+                    _feature(
+                        "south_limit",
+                        geometry={
+                            "type": "LineString",
+                            "coordinates": south_coords,
+                        },
+                        properties={
+                            "level": float(level),
+                        },
+                    )
+                )
+
+    print(
+        "limit features:",
+        len(limit_features)
+    )
+
+    return limit_features
 
 def export_eclipse_geojson(eclipse, local=None, points=None, output=None):
     if output is None:
