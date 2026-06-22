@@ -4,10 +4,8 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 import numpy as np
 import matplotlib
-from scipy.ndimage import zoom
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from scipy.interpolate import splprep, splev
 
 
 def _time_iso(t):
@@ -30,7 +28,9 @@ def _feature(name, geometry=None, when=None, properties=None):
 
 
 def _contour_levels(max_obsc):
-    levels = [0.1, 0.25, 0.5, 0.75, 0.9]
+    # Include a very low isoline to show the farthest "limit of visibility".
+    # 0.001 == 0.1%
+    levels = [0.001, 0.1, 0.25, 0.5, 0.75, 0.9]
     return [level for level in levels if level <= max_obsc]
 
 
@@ -41,6 +41,7 @@ def _limit_levels(max_obsc):
 
 def _band_style(level):
     palette = [
+        (0.001, "#f7f7f7", 0.18),
         (0.10, "#ffffcc", 0.28),
         (0.25, "#ffeda0", 0.32),
         (0.50, "#feb24c", 0.36),
@@ -55,25 +56,25 @@ def _band_style(level):
 
 def _polygon_coords(segment):
     if len(segment) > 10:
-        tck, _ = splprep(
-            [segment[:, 0], segment[:, 1]],
-            s=0
-        )
+        dense = []
 
-        u_new = np.linspace(
-            0,
-            1,
-            len(segment) * 8
-        )
+        for start, end in zip(
+            segment[:-1],
+            segment[1:],
+        ):
+            for fraction in np.linspace(
+                0.0,
+                1.0,
+                8,
+                endpoint=False,
+            ):
+                dense.append(
+                    start * (1.0 - fraction)
+                    + end * fraction
+                )
 
-        x_new, y_new = splev(
-            u_new,
-            tck
-        )
-
-        segment = np.column_stack(
-            [x_new, y_new]
-        )
+        dense.append(segment[-1])
+        segment = np.asarray(dense)
     coords = [[float(x), float(y)] for x, y in segment]
     if coords and coords[0] != coords[-1]:
         coords.append(coords[0])
@@ -171,6 +172,127 @@ def _band_features(points):
     return features
 
 
+def _split_limit_segment(segment):
+    if len(segment) < 4:
+        return []
+
+    ring = np.asarray(
+        segment,
+        dtype=float,
+    )
+
+    if np.allclose(
+        ring[0],
+        ring[-1],
+    ):
+        ring = ring[:-1]
+
+    if len(ring) < 4:
+        return []
+
+    centered = ring - ring.mean(
+        axis=0
+    )
+    _, _, vh = np.linalg.svd(
+        centered,
+        full_matrices=False,
+    )
+    axis = vh[0]
+    projection = centered @ axis
+
+    i0 = int(
+        np.argmin(projection)
+    )
+    i1 = int(
+        np.argmax(projection)
+    )
+
+    if i0 == i1:
+        return []
+
+    if i0 > i1:
+        i0, i1 = i1, i0
+
+    side_a = ring[i0 : i1 + 1]
+    side_b = np.vstack(
+        [ring[i1:], ring[: i0 + 1]]
+    )
+
+    result = []
+    for side in (side_a, side_b):
+        if len(side) < 2:
+            continue
+        coords = [
+            [float(x), float(y)]
+            for x, y in side
+        ]
+        result.append(coords)
+
+    return result
+
+
+def _smooth_limit_coords(coords):
+    if len(coords) < 6:
+        return coords
+
+    arr = np.asarray(
+        coords,
+        dtype=float,
+    )
+
+    smoothed = arr.copy()
+
+    # Smooth only the generated limit line. The obscuration grid stays unchanged.
+    # We intentionally avoid scipy.ndimage here because importing it can hang on
+    # some Windows/Python builds (WMI query during import). Use a NumPy-only
+    # Gaussian convolution instead.
+    sigma = float(
+        max(
+            1.2,
+            min(6.0, len(arr) / 90.0),
+        )
+    )
+
+    radius = int(max(3, round(sigma * 4)))
+    x = np.arange(-radius, radius + 1, dtype=float)
+    kernel = np.exp(-0.5 * (x / sigma) ** 2)
+    kernel /= kernel.sum()
+
+    def smooth1d(values):
+        padded = np.pad(
+            values,
+            (radius, radius),
+            mode="edge",
+        )
+        return np.convolve(
+            padded,
+            kernel,
+            mode="valid",
+        )
+
+    smoothed[:, 0] = smooth1d(arr[:, 0])
+    smoothed[:, 1] = smooth1d(arr[:, 1])
+    smoothed[0] = arr[0]
+    smoothed[-1] = arr[-1]
+
+    # Densify between smoothed vertices so Cesium renders a visibly continuous curve.
+    dense = []
+    for i in range(len(smoothed) - 1):
+        p0 = smoothed[i]
+        p1 = smoothed[i + 1]
+        dense.append(p0)
+        for t in (0.25, 0.5, 0.75):
+            dense.append(
+                p0 * (1.0 - t) + p1 * t
+            )
+    dense.append(smoothed[-1])
+
+    return [
+        [float(x), float(y)]
+        for x, y in dense
+    ]
+
+
 def _limit_features(points):
     if not points:
         return []
@@ -236,33 +358,26 @@ def _limit_features(points):
             if len(segment) < 2:
                 continue
 
-            coords = [
-                [float(x), float(y)]
-                for x, y in segment
-            ]
-
-            lats_seg = np.array(
-                [c[1] for c in coords]
+            sides = _split_limit_segment(
+                segment
             )
 
-            mid_lat = (
-                lats_seg.min()
-                + lats_seg.max()
-            ) / 2.0
+            if len(sides) < 2:
+                continue
 
-            north_coords = [
-                c
-                for c in coords
-                if c[1] >= mid_lat
+            sides.sort(
+                key=lambda coords: np.mean(
+                    [c[1] for c in coords]
+                ),
+                reverse=True,
+            )
+
+            north_coords, south_coords = [
+                _smooth_limit_coords(coords)
+                for coords in sides[:2]
             ]
 
-            south_coords = [
-                c
-                for c in coords
-                if c[1] < mid_lat
-            ]
-
-            if len(north_coords) > 2:
+            if len(north_coords) > 1:
                 limit_features.append(
                     _feature(
                         "north_limit",
@@ -276,7 +391,7 @@ def _limit_features(points):
                     )
                 )
 
-            if len(south_coords) > 2:
+            if len(south_coords) > 1:
                 limit_features.append(
                     _feature(
                         "south_limit",

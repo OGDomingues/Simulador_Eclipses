@@ -63,7 +63,16 @@ def run_batch(
         max_workers=None,
 ):
     if max_workers is None:
-        max_workers = os.cpu_count()
+        configured_workers = os.getenv("ECLIPSE_MAX_WORKERS")
+        if configured_workers:
+            max_workers = int(configured_workers)
+        else:
+            max_workers = min(os.cpu_count() or 1, 4)
+
+    max_workers = max(
+        1,
+        min(max_workers, len(new_moon_times)),
+    )
 
     results = []
 

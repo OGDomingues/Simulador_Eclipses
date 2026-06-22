@@ -18,15 +18,14 @@ from geometry.surface_map import (
     eclipse_obscuration_map,
 )
 
-from geometry.export import (
-    _band_features,
-    _limit_features,
-)
-
-
 def get_geojson(
     target_date: str,
 ):
+    from geometry.export import (
+        _band_features,
+        _limit_features,
+    )
+
     eph, ts = get_context()
 
     year = int(
@@ -81,9 +80,9 @@ def get_geojson(
         ),
         t_start=selected["C1"],
         t_end=selected["C4"],
-        lat_step=0.25,
-        lon_step=0.25,
-        time_chunks=16,
+        lat_step=0.5,
+        lon_step=0.5,
+        time_chunks=32,
         processes=15,
     )
 

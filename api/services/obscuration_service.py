@@ -16,6 +16,10 @@ from core import (
 
 from geometry.surface_map import (
     eclipse_obscuration_map,
+    eclipse_obscuration_frame,
+)
+from api.services.circumstances_service import (
+    parse_utc_time,
 )
 
 
@@ -87,6 +91,44 @@ def get_obscuration_map(
     return {
         "count": len(points),
 
+        "points": [
+            {
+                "lat": lat,
+                "lon": lon,
+                "obscuration": obsc,
+            }
+            for lat, lon, obsc in points
+        ],
+    }
+
+
+def get_shadow_frame(
+    time: str,
+    lat_step: float = 2.0,
+    lon_step: float = 2.0,
+    min_obscuration: float = 0.001,
+):
+    eph, ts = get_context()
+    when = parse_utc_time(
+        ts,
+        time,
+    )
+
+    if when is None:
+        return None
+
+    points = eclipse_obscuration_frame(
+        eph=eph,
+        ts=ts,
+        when=when,
+        lat_step=lat_step,
+        lon_step=lon_step,
+        min_obscuration=min_obscuration,
+    )
+
+    return {
+        "time": time,
+        "count": len(points),
         "points": [
             {
                 "lat": lat,

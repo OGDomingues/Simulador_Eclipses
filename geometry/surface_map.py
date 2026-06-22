@@ -378,3 +378,233 @@ def eclipse_obscuration_map(
         )
         for i, j in zip(lat_idx, lon_idx)
     ]
+
+
+def _eclipse_obscuration_points_for_coords(
+        eph,
+        when,
+        lat_flat,
+        lon_flat,
+        min_obscuration,
+):
+    if len(lat_flat) == 0:
+        return []
+
+    ecef = geodetic_to_ecef(lat_flat, lon_flat)
+    ecef_x = ecef[:, 0]
+    ecef_y = ecef[:, 1]
+    ecef_z = ecef[:, 2]
+    ecef_norm = np.linalg.norm(ecef, axis=1)
+    max_ecef_norm = ecef_norm.max()
+
+    theta = np.radians(when.gmst * 15.0)
+    c = np.cos(theta)
+    s = np.sin(theta)
+
+    obs_x = c * ecef_x - s * ecef_y
+    obs_y = s * ecef_x + c * ecef_y
+    obs_z = ecef_z
+
+    earth_at_t = eph["earth"].at(when)
+    sun_vec = earth_at_t.observe(
+        eph["sun"]
+    ).apparent().position.km
+    moon_vec = earth_at_t.observe(
+        eph["moon"]
+    ).apparent().position.km
+
+    sun_distance = np.linalg.norm(sun_vec)
+    moon_distance = np.linalg.norm(moon_vec)
+
+    sun_dot_up = (
+        (
+            obs_x * sun_vec[0]
+            + obs_y * sun_vec[1]
+            + obs_z * sun_vec[2]
+        )
+        / ecef_norm
+        - ecef_norm
+    )
+    day_idx = np.flatnonzero(sun_dot_up > 0.0)
+
+    if len(day_idx) == 0:
+        return []
+
+    day_obs_x = obs_x[day_idx]
+    day_obs_y = obs_y[day_idx]
+    day_obs_z = obs_z[day_idx]
+
+    sun_topo_x = sun_vec[0] - day_obs_x
+    sun_topo_y = sun_vec[1] - day_obs_y
+    sun_topo_z = sun_vec[2] - day_obs_z
+
+    moon_topo_x = moon_vec[0] - day_obs_x
+    moon_topo_y = moon_vec[1] - day_obs_y
+    moon_topo_z = moon_vec[2] - day_obs_z
+
+    sun_norm = np.sqrt(
+        sun_topo_x * sun_topo_x
+        + sun_topo_y * sun_topo_y
+        + sun_topo_z * sun_topo_z
+    )
+    moon_norm = np.sqrt(
+        moon_topo_x * moon_topo_x
+        + moon_topo_y * moon_topo_y
+        + moon_topo_z * moon_topo_z
+    )
+
+    cosang = (
+        sun_topo_x * moon_topo_x
+        + sun_topo_y * moon_topo_y
+        + sun_topo_z * moon_topo_z
+    ) / (sun_norm * moon_norm)
+    cosang = np.clip(cosang, -1.0, 1.0)
+
+    max_disc_sum = (
+        np.arcsin(
+            R_SUN_KM
+            / (sun_distance - max_ecef_norm)
+        )
+        + np.arcsin(
+            R_MOON_KM
+            / (moon_distance - max_ecef_norm)
+        )
+    )
+    possible_idx = np.flatnonzero(
+        cosang >= np.cos(max_disc_sum) - INTERSECTION_EPSILON
+    )
+
+    if len(possible_idx) == 0:
+        return []
+
+    Rs = np.arcsin(
+        R_SUN_KM / sun_norm[possible_idx]
+    )
+    Rm = np.arcsin(
+        R_MOON_KM / moon_norm[possible_idx]
+    )
+    possible_cosang = cosang[possible_idx]
+    maybe_intersect = (
+        possible_cosang
+        >= np.cos(Rs + Rm) - INTERSECTION_EPSILON
+    )
+
+    if not np.any(maybe_intersect):
+        return []
+
+    candidate_idx = day_idx[possible_idx[maybe_intersect]]
+    d = np.arccos(possible_cosang[maybe_intersect])
+    obsc = eclipse_obscuration_vec(
+        d,
+        Rs[maybe_intersect],
+        Rm[maybe_intersect],
+    )
+    keep = obsc >= min_obscuration
+
+    if not np.any(keep):
+        return []
+
+    candidate_idx = candidate_idx[keep]
+    obsc = obsc[keep]
+
+    return [
+        (
+            float(lat_flat[i]),
+            float(lon_flat[i]),
+            float(value),
+        )
+        for i, value in zip(candidate_idx, obsc)
+    ]
+
+
+def eclipse_obscuration_frame(
+        eph,
+        ts,
+        when,
+        lat_step=2.0,
+        lon_step=2.0,
+        min_obscuration=0.001,
+):
+    """
+    Calcula a sombra instantanea da Lua na superficie da Terra.
+    Retorna apenas pontos onde os discos aparentes do Sol e da Lua se sobrepoem.
+    """
+    lat_step = max(0.5, float(lat_step))
+    lon_step = max(0.5, float(lon_step))
+    min_obscuration = max(0.0, float(min_obscuration))
+
+    lats = np.arange(-90.0, 90.0 + lat_step, lat_step)
+    lons = np.arange(-180.0, 180.0 + lon_step, lon_step)
+
+    lat_grid, lon_grid = np.meshgrid(lats, lons, indexing="ij")
+    lat_flat = lat_grid.ravel()
+    lon_flat = lon_grid.ravel()
+
+    points = _eclipse_obscuration_points_for_coords(
+        eph,
+        when,
+        lat_flat,
+        lon_flat,
+        min_obscuration,
+    )
+
+    if not points:
+        return []
+
+    center_lat, center_lon, _ = max(
+        points,
+        key=lambda item: item[2],
+    )
+    fine_lat_step = max(
+        0.15,
+        lat_step / 3.0,
+    )
+    fine_lon_step = max(
+        0.15,
+        lon_step / 3.0,
+    )
+    lat_radius = max(4.0, lat_step * 8.0)
+    lon_radius = max(4.0, lon_step * 8.0)
+    fine_lats = np.arange(
+        max(-90.0, center_lat - lat_radius),
+        min(90.0, center_lat + lat_radius) + fine_lat_step,
+        fine_lat_step,
+    )
+    fine_lons = np.arange(
+        center_lon - lon_radius,
+        center_lon + lon_radius + fine_lon_step,
+        fine_lon_step,
+    )
+    fine_lons = ((fine_lons + 180.0) % 360.0) - 180.0
+    fine_lat_grid, fine_lon_grid = np.meshgrid(
+        fine_lats,
+        fine_lons,
+        indexing="ij",
+    )
+    fine_points = _eclipse_obscuration_points_for_coords(
+        eph,
+        when,
+        fine_lat_grid.ravel(),
+        fine_lon_grid.ravel(),
+        min_obscuration,
+    )
+
+    merged = {}
+    precision = 4
+    for lat, lon, obsc in points + fine_points:
+        key = (
+            round(lat, precision),
+            round(lon, precision),
+        )
+        previous = merged.get(key)
+        if previous is None or obsc > previous:
+            merged[key] = obsc
+
+    return [
+        (
+            lat,
+            lon,
+            obsc,
+        )
+        for (lat, lon), obsc in merged.items()
+    ]

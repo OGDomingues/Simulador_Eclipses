@@ -1,15 +1,18 @@
 from pipeline.batch import run_batch
 from core import new_moons
-from geometry import central_path
+from geometry.central_path import central_path
 from infrastructure.ephemeris import get_context
 from geometry.eclipse_band import (
     build_totality_limits,
 )
 
 def get_real_eclipse(target_date: str):
-    eph, ts = get_context()
+    try:
+        year = int(target_date[:4])
+    except ValueError:
+        return None
 
-    year = int(target_date[:4])
+    eph, ts = get_context()
 
     t_start = ts.utc(year, 1, 1)
     t_end = ts.utc(year, 12, 31)
@@ -54,6 +57,28 @@ def get_real_eclipse(target_date: str):
         step_minutes=0.5,
     )
 
+    best_index = None
+    best_point = None
+
+    if path:
+        best_index, best_point = min(
+            enumerate(path),
+            key=lambda item: abs(
+                item[1][2].tt - selected["MAX"].tt
+            ),
+        )
+
+    central_path_data = [
+        {
+            "lat": lat,
+            "lon": lon,
+            "time": time.utc_strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+        }
+        for lat, lon, time in path
+    ]
+
     # print(
     #     "Central path:",
     #     len(path)
@@ -69,14 +94,18 @@ def get_real_eclipse(target_date: str):
     return {
         "date": target_date,
 
-        "centralPath": [
+        "centralPath": central_path_data,
+
+        "bestObservation": (
             {
-                "lat": lat,
-                "lon": lon,
-                "time": time.utc_strftime(
+                "lat": best_point[0],
+                "lon": best_point[1],
+                "time": best_point[2].utc_strftime(
                     "%Y-%m-%dT%H:%M:%SZ"
                 ),
+                "index": best_index,
             }
-            for lat, lon, time in path
-        ]
+            if best_point is not None
+            else None
+        ),
     }
