@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n back,front -c blue,green \"npm run dev:back\" \"npm run dev:front\"",
+    "dev:back": ".\\.venv\\Scripts\\python.exe run_uvicorn_dev.py",
+    "dev:front": "npm --prefix eclipse-web run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

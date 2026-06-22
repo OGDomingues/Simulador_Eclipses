@@ -3,8 +3,10 @@ from core import (
     compute_local_circumstances,
     compute_local_circumstances_at,
 )
+from core.constants import R_MOON_KM, R_SUN_KM
 import numpy as np
 from functools import lru_cache
+from skyfield.api import wgs84
 
 from infrastructure.ephemeris import (
     get_context,
@@ -34,12 +36,43 @@ def serialize_time(t):
     )
 
 
+def disc_fully_below_horizon(
+    altitude_deg,
+    radius_deg,
+):
+    return bool(altitude_deg <= -abs(radius_deg or 0.0))
+
+
+def both_discs_below_horizon(instant):
+    return (
+        disc_fully_below_horizon(
+            instant["sun_alt_deg"],
+            instant.get("sun_radius_deg"),
+        )
+        and disc_fully_below_horizon(
+            instant["moon_alt_deg"],
+            instant.get("moon_radius_deg"),
+        )
+    )
+
+
 def circumstance_payload(local, instant, visible):
+    geometric_obscuration = instant["max_obscuration"]
+    geometric_magnitude = instant.get("magnitude")
+    sun_disc_below_horizon = disc_fully_below_horizon(
+        instant["sun_alt_deg"],
+        instant.get("sun_radius_deg"),
+    )
+    moon_disc_below_horizon = disc_fully_below_horizon(
+        instant["moon_alt_deg"],
+        instant.get("moon_radius_deg"),
+    )
+
     return {
-        "obscuration":
-            instant["max_obscuration"] if visible else 0.0,
-        "magnitude":
-            instant.get("magnitude") if visible else 0.0,
+        "obscuration": geometric_obscuration if visible else 0.0,
+        "magnitude": geometric_magnitude if visible else 0.0,
+        "geometric_obscuration": geometric_obscuration,
+        "geometric_magnitude": geometric_magnitude,
         "duration_sec":
             local.get("eclipse_duration_sec"),
         "totality_duration_sec":
@@ -82,6 +115,10 @@ def circumstance_payload(local, instant, visible):
             instant.get("separation_deg"),
         "current_time":
             serialize_time(instant["MAX"]),
+        "sun_disc_below_horizon": sun_disc_below_horizon,
+        "moon_disc_below_horizon": moon_disc_below_horizon,
+        "bodies_below_horizon":
+            sun_disc_below_horizon and moon_disc_below_horizon,
         "visible": visible,
     }
 
@@ -89,7 +126,10 @@ def circumstance_payload(local, instant, visible):
 def is_visible(instant):
     return bool(
         instant["max_obscuration"] > MIN_VISIBLE_OBSCURATION
-        and instant["sun_alt_deg"] > 0.0
+        and not disc_fully_below_horizon(
+            instant["sun_alt_deg"],
+            instant.get("sun_radius_deg"),
+        )
     )
 
 
@@ -208,11 +248,97 @@ def local_time_range(local):
             center.tt + (2.0 / 24.0),
         )
 
-    padding_days = (10 * 60) / 86400.0
+    padding_days = (90 * 60) / 86400.0
     return (
         start.tt - padding_days,
         end.tt + padding_days,
     )
+
+
+def both_below_horizon_mask(
+    eph,
+    ts,
+    lat: float,
+    lon: float,
+    tt_values,
+):
+    earth = eph["earth"]
+    sun = eph["sun"]
+    moon = eph["moon"]
+    observer = earth + wgs84.latlon(lat, lon)
+    times = ts.tt_jd(tt_values)
+    ast = observer.at(times)
+
+    sun_ast = ast.observe(sun).apparent()
+    moon_ast = ast.observe(moon).apparent()
+
+    sun_alt, _, _ = sun_ast.altaz()
+    moon_alt, _, _ = moon_ast.altaz()
+
+    sun_radius_deg = np.degrees(
+        np.arcsin(R_SUN_KM / sun_ast.distance().km)
+    )
+    moon_radius_deg = np.degrees(
+        np.arcsin(R_MOON_KM / moon_ast.distance().km)
+    )
+
+    return (
+        sun_alt.degrees <= -sun_radius_deg
+    ) & (
+        moon_alt.degrees <= -moon_radius_deg
+    )
+
+
+def find_both_below_horizon_tt(
+    eph,
+    ts,
+    lat: float,
+    lon: float,
+    start_tt: float,
+):
+    search_step_days = (10 * 60) / 86400.0
+    max_search_days = 1.5
+    tt_values = np.arange(
+        start_tt,
+        start_tt + max_search_days + search_step_days,
+        search_step_days,
+    )
+
+    below_mask = both_below_horizon_mask(
+        eph,
+        ts,
+        lat,
+        lon,
+        tt_values,
+    )
+    below_indices = np.flatnonzero(below_mask)
+
+    if len(below_indices) == 0:
+        return start_tt
+
+    first_below_index = int(below_indices[0])
+
+    if first_below_index == 0:
+        return start_tt
+
+    low = float(tt_values[first_below_index - 1])
+    high = float(tt_values[first_below_index])
+
+    for _ in range(18):
+        middle = (low + high) / 2.0
+        instant = compute_local_circumstances_at(
+            eph=eph,
+            when=ts.tt_jd(middle),
+            lat=lat,
+            lon=lon,
+        )
+
+        if both_discs_below_horizon(instant):
+            high = middle
+        else:
+            low = middle
+
+    return high
 
 
 def build_local_frames(
@@ -232,7 +358,18 @@ def build_local_frames(
     if local is None:
         return None
 
-    start_tt, end_tt = local_time_range(local)
+    start_tt, contact_end_tt = local_time_range(local)
+    horizon_end_tt = find_both_below_horizon_tt(
+        eph,
+        ts,
+        lat,
+        lon,
+        contact_end_tt,
+    )
+    end_tt = max(
+        contact_end_tt,
+        horizon_end_tt,
+    )
 
     count = int(
         np.ceil(
@@ -243,7 +380,7 @@ def build_local_frames(
     ) + 1
     count = max(
         2,
-        min(count, 360),
+        min(count, 720),
     )
 
     times = ts.tt_jd(
@@ -272,8 +409,8 @@ def build_local_frames(
         )
         frames.append(frame)
 
-        if frame["obscuration"] > max_obscuration:
-            max_obscuration = frame["obscuration"]
+        if instant["max_obscuration"] > max_obscuration:
+            max_obscuration = instant["max_obscuration"]
             max_frame_index = index
 
     return {
